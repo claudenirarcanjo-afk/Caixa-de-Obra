@@ -47,7 +47,14 @@ button:disabled{opacity:.5}
 #cropBox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.55);touch-action:none}
 .hd{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;background:#fff;border:3px solid var(--red);border-radius:50%;touch-action:none}
 .hd[data-h=nw]{left:0;top:0}.hd[data-h=n]{left:50%;top:0}.hd[data-h=ne]{left:100%;top:0}.hd[data-h=e]{left:100%;top:50%}
-.hd[data-h=se]{left:100%;top:100%}.hd[data-h=s]{left:50%;top:100%}.hd[data-h=sw]{left:0;top:100%}.hd[data-h=w]{left:0;top:50%}[hidden]{display:none!important}
+.hd[data-h=se]{left:100%;top:100%}.hd[data-h=s]{left:50%;top:100%}.hd[data-h=sw]{left:0;top:100%}.hd[data-h=w]{left:0;top:50%}.stack{display:grid;gap:14px}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.steps div{border-top:4px solid var(--line);padding-top:6px;font-size:12px;color:var(--muted)}
+.steps div.on{border-top-color:var(--red);color:var(--ink);font-weight:600}
+.ant{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.ant:last-child{border-bottom:0}
+.ant .t{display:grid;gap:2px}.ant .t small{color:var(--muted)}
+.pill.ok{background:var(--oksoft);color:var(--ok)}.pill.red{background:var(--redsoft);color:var(--red)}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -92,11 +99,29 @@ button:disabled{opacity:.5}
       <div class="msg" id="sendMsg" hidden></div>
     </div>
 
-    <div id="semana" class="card" hidden>
-      <h2>Semana em andamento</h2>
-      <div id="lista"></div>
-      <div class="total"><span>Total</span><span id="total">R$ 0,00</span></div>
-      <button id="refresh">Atualizar</button>
+    <div class="card" id="fin" hidden>
+      <b id="finTxt"></b>
+      <button class="primary" id="finBtn" type="button">Finalizar semana e enviar ao conferente</button>
+      <div class="msg" id="finMsg" hidden></div>
+    </div>
+
+    <div id="semana" class="stack" hidden>
+      <div class="card">
+        <h2>Semana em andamento</h2>
+        <div class="steps" id="tl"></div>
+        <div class="msg err" id="devMsg" hidden></div>
+        <div id="acoes" class="stack"></div>
+        <div class="msg" id="acaoMsg" hidden></div>
+      </div>
+      <div class="card">
+        <div id="lista"></div>
+        <div class="total"><span>Total</span><span id="total">R$ 0,00</span></div>
+        <button id="refresh">Atualizar</button>
+      </div>
+      <div class="card" id="antCard" hidden>
+        <h2>Caixas anteriores</h2>
+        <div id="anteriores"></div>
+      </div>
     </div>
   </section>
 </div>
@@ -106,12 +131,13 @@ button:disabled{opacity:.5}
 var CODE = '', PAPEL = '', DADOS = null, FOTO = null;
 var $ = function (id) { return document.getElementById(id); };
 var API_URL = 'https://script.google.com/macros/s/AKfycbxTeJ_SnDp1LfnWYwbLaDy9NwTdLIdrjb4APa0Nu1rBR8oOJWAVFqeNqURSkOo2isWA/exec';
-var ACOES = { appInit: 'init', appListar: 'listar', appAdicionar: 'adicionar', appExcluir: 'excluir', appFoto: 'foto', appLer: 'ler' };
+var ACOES = { appInit: 'init', appListar: 'listar', appAdicionar: 'adicionar', appExcluir: 'excluir', appFoto: 'foto', appLer: 'ler', appSemana: 'semana', appCaixas: 'caixas', appEnviar: 'enviar', appAprovar: 'aprovar', appDevolver: 'devolver', appPagar: 'pagar' };
 function run(fn, codigo, arg) {
   return fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ app: ACOES[fn], codigo: codigo, arg: arg }) })
     .then(function (r) { return r.json(); })
     .then(function (j) { if (!j.ok) throw new Error(j.erro || 'Erro'); return j.data; });
-}function brl(v) { return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+}
+function brl(v) { return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function show(el, on) { el.hidden = !on; }
 function flash(el, text, kind) { el.textContent = text; el.className = 'msg ' + kind; el.hidden = false; }
 function hoje() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
@@ -144,7 +170,8 @@ function montar() {
   aba(PAPEL === 'claudenir' ? 'novo' : 'semana');
 }
 function aba(nome) {
-  show($('novo'), nome === 'novo' && PAPEL === 'claudenir'); show($('semana'), nome === 'semana');
+  show($('novo'), nome === 'novo' && PAPEL === 'claudenir'); show($('semana'), nome === 'semana'); show($('fin'), nome === 'novo' && FIN_OK);
+  if (nome === 'novo') atualizarFin();
   Array.prototype.forEach.call($('tabs').children, function (b) { b.setAttribute('aria-pressed', b.dataset.t === nome); });
   if (nome === 'semana') listar();
 }
@@ -154,7 +181,7 @@ function lerArquivo(f) {
     var r = new FileReader(); r.onload = function () { ok(r.result); }; r.onerror = function () { fail(new Error('Não consegui ler o arquivo')); }; r.readAsDataURL(f);
   });
 }
-var SRC = null, RC = null, ROT = 0, CROP = { x0: 0, y0: 0, x1: 1, y1: 1 }, EDIT = false, DRAG = null, LEITURA = null, SEQ = 0, TMR = null;
+var FIN_OK = false, PREVIA = null, SRC = null, RC = null, ROT = 0, CROP = { x0: 0, y0: 0, x1: 1, y1: 1 }, EDIT = false, DRAG = null, LEITURA = null, SEQ = 0, TMR = null;
 function carregarImg(dataUrl) {
   return new Promise(function (ok, fail) {
     var im = new Image(); im.onload = function () { ok(im); }; im.onerror = function () { fail(new Error('Imagem inválida')); }; im.src = dataUrl;
@@ -232,6 +259,8 @@ function mostrarAjuste() {
 function mostrarResultado(ler) {
   EDIT = false; $('btnCrop').textContent = 'Ajustar recorte'; show($('cropWrap'), false);
   var c = cortar(RC, CROP); c = melhorar(c, $('scanMode').value);
+  var pm = Math.min(1, 1400 / Math.max(c.width, c.height)), pc = document.createElement('canvas'); pc.width = Math.round(c.width * pm); pc.height = Math.round(c.height * pm);
+  pc.getContext('2d').drawImage(c, 0, 0, pc.width, pc.height); PREVIA = pc.toDataURL('image/jpeg', 0.72).split(',')[1];
   $('prev').src = c.toDataURL('image/jpeg', 0.7); show($('prev'), true);
   var b64 = null; try { b64 = gerarPdf(c); } catch (e) { b64 = null; }
   var base = (SRC.__nome || 'nota').replace(/\.[^.]+$/, '');
@@ -261,7 +290,7 @@ async function escolheu(f) {
   try {
     var d = await lerArquivo(f);
     if (f.type === 'application/pdf') {
-      SRC = null; RC = null; show($('scanCtl'), false); show($('modeLbl'), false); show($('prev'), false); show($('cropWrap'), false);
+      SRC = null; RC = null; PREVIA = null; show($('scanCtl'), false); show($('modeLbl'), false); show($('prev'), false); show($('cropWrap'), false);
       FOTO = { nome: f.name, mime: 'application/pdf', base64: d.split(',')[1] };
       $('photoName').textContent = f.name + ' (' + Math.round(FOTO.base64.length * 0.75 / 1024) + ' KB)';
       lerComIA();
@@ -295,12 +324,12 @@ async function enviar() {
   if (!(v >= 0) || $('valor').value === '') return flash($('sendMsg'), 'Informe o valor da nota.', 'err');
   $('send').disabled = true; flash($('sendMsg'), 'Enviando...', 'ok');
   try {
-    await run('appAdicionar', CODE, { dataDoc: $('data').value, centro: $('centro').value, categoria: $('cat').value, estabelecimento: $('estab').value, valor: v, obs: $('obs').value, foto: FOTO, leitura: LEITURA });
+    await run('appAdicionar', CODE, { dataDoc: $('data').value, centro: $('centro').value, categoria: $('cat').value, estabelecimento: $('estab').value, valor: v, obs: $('obs').value, foto: FOTO, previa: PREVIA ? { base64: PREVIA } : null, leitura: LEITURA });
     try { localStorage.setItem('cx_centro', $('centro').value); } catch (e) {}
-    FOTO = null; SRC = null; RC = null; LEITURA = null; SEQ++; EDIT = false;
+    FOTO = null; SRC = null; RC = null; PREVIA = null; LEITURA = null; SEQ++; EDIT = false;
     show($('prev'), false); show($('cropWrap'), false); show($('scanCtl'), false); show($('modeLbl'), false); show($('aiMsg'), false); $('photoName').textContent = 'Nenhuma foto escolhida';
     $('valor').value = ''; $('estab').value = ''; $('obs').value = ''; $('cam').value = ''; $('file').value = ''; $('data').value = hoje();
-    flash($('sendMsg'), 'Comprovante enviado.', 'ok');
+    flash($('sendMsg'), 'Comprovante enviado.', 'ok'); atualizarFin();
   } catch (e) { flash($('sendMsg'), 'Não enviou: ' + e.message, 'err'); }
   $('send').disabled = false;
 }
@@ -313,30 +342,106 @@ $('cropWrap').addEventListener('pointermove', moverArraste);
 $('cropWrap').addEventListener('pointerup', fimArraste);
 $('cropWrap').addEventListener('pointercancel', fimArraste);
 
-async function listar() {
-  var box = $('lista'); box.textContent = 'Carregando...';
+var ESTADO = 'aberta';
+var ETAPAS = ['Preenchendo', 'Enviado', 'Aprovado', 'Reembolso pago'];
+function indiceEtapa(e) { return { aberta: 0, devolvida: 0, enviada: 1, aprovada: 2, paga: 3 }[e] || 0; }
+function btn(txt, cls, fn) { var b = document.createElement('button'); b.textContent = txt; if (cls) b.className = cls; b.onclick = function () { fn(b); }; return b; }
+function confirmar(b, txtOriginal, fn) {
+  if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Toque de novo para confirmar'; setTimeout(function () { b.dataset.sure = ''; b.textContent = txtOriginal; }, 4000); return; }
+  fn();
+}
+async function acao(nome, arg, okMsg) {
+  var a = $('acaoMsg'); flash(a, 'Enviando...', 'ok');
+  try { await run(nome, CODE, arg); flash(a, okMsg, 'ok'); await listar(true); }
+  catch (e) { flash(a, e.message, 'err'); }
+}
+function renderEstado(s) {
+  ESTADO = s.estado;
+  var tl = $('tl'); tl.innerHTML = '';
+  var idx = indiceEtapa(s.estado);
+  ETAPAS.forEach(function (t, i) { var d = document.createElement('div'); d.textContent = t; if (i <= idx) d.className = 'on'; tl.appendChild(d); });
+  var dm = $('devMsg');
+  if (s.estado === 'devolvida') { dm.textContent = 'Devolvido pelo conferente: ' + s.obs; dm.hidden = false; } else dm.hidden = true;
+  var box = $('acoes'); box.innerHTML = '';
+  if (PAPEL === 'claudenir') {
+    if ((s.estado === 'aberta' || s.estado === 'devolvida') && s.itens.length) {
+      var e = btn('Finalizar semana e enviar ao conferente', 'primary', function (b) { confirmar(b, 'Finalizar semana e enviar ao conferente', function () { acao('appEnviar', null, 'Semana enviada ao conferente.'); }); });
+      box.appendChild(e);
+    } else if (s.estado === 'enviada') box.appendChild(document.createTextNode('Aguardando a conferência. Você não pode alterar os comprovantes até a decisão.'));
+    else if (s.estado === 'aprovada') box.appendChild(document.createTextNode('Caixa aprovado. O reembolso será lançado.'));
+  } else {
+    if (s.estado === 'enviada') {
+      var obs = document.createElement('input'); obs.type = 'text'; obs.id = 'obsDev'; obs.placeholder = 'Observação (obrigatória para devolver)';
+      box.appendChild(obs);
+      var row = document.createElement('div'); row.className = 'row';
+      row.appendChild(btn('Devolver', '', function (b) { confirmar(b, 'Devolver', function () { acao('appDevolver', obs.value, 'Caixa devolvido ao Claudenir.'); }); }));
+      row.appendChild(btn('Aprovar o caixa', 'primary', function (b) { confirmar(b, 'Aprovar o caixa', function () { acao('appAprovar', null, 'Caixa aprovado.'); }); }));
+      box.appendChild(row);
+    } else if (s.estado === 'aprovada') {
+      box.appendChild(btn('Marcar reembolso como pago', 'primary', function (b) { confirmar(b, 'Marcar reembolso como pago', function () { acao('appPagar', 'atual', 'Reembolso marcado como pago.'); }); }));
+    } else if (s.estado === 'aberta' || s.estado === 'devolvida') box.appendChild(document.createTextNode('O Claudenir ainda não enviou a semana para conferência.'));
+  }
+}
+function renderLista(itens) {
+  var box = $('lista'), total = 0; box.innerHTML = '';
+  if (!itens.length) box.textContent = 'Nenhum comprovante nesta semana.';
+  itens.forEach(function (it) {
+    total += Number(it.valor) || 0;
+    var d = document.createElement('div'); d.className = 'item';
+    var top = document.createElement('div'); top.className = 'top';
+    var a = document.createElement('span'); a.textContent = it.estabelecimento || it.categoria;
+    var b = document.createElement('span'); b.textContent = brl(it.valor); top.appendChild(a); top.appendChild(b);
+    var m = document.createElement('div'); m.className = 'meta';
+    m.textContent = it.dataDoc.split('-').reverse().join('/') + ' · Centro ' + it.centro + ' · ' + it.categoria + (it.obs ? ' · ' + it.obs : '') + (it.alertas ? ' · ⚠ ' + it.alertas : '');
+    var ac = document.createElement('div'); ac.className = 'acts';
+    var v = document.createElement('button'); v.textContent = 'Ver foto'; v.onclick = function () { verFoto(it.id, v); }; ac.appendChild(v);
+    if (PAPEL === 'claudenir' && (ESTADO === 'aberta' || ESTADO === 'devolvida')) { var x = document.createElement('button'); x.textContent = 'Excluir'; x.onclick = function () { excluir(it.id, x); }; ac.appendChild(x); }
+    d.appendChild(top); d.appendChild(m); d.appendChild(ac); box.appendChild(d);
+  });
+  $('total').textContent = brl(total);
+}
+function renderAnteriores(cx) {
+  var box = $('anteriores'); box.innerHTML = '';
+  $('antCard').hidden = !cx.length;
+  cx.forEach(function (c) {
+    var d = document.createElement('div'); d.className = 'ant';
+    var t = document.createElement('div'); t.className = 't';
+    var n = document.createElement('b'); n.textContent = c.nome + ' · ' + brl(c.total);
+    var s = document.createElement('small'); s.textContent = c.atualizadoEm; t.appendChild(n); t.appendChild(s); d.appendChild(t);
+    var rotulo = { paga: ['Reembolso pago', 'ok'], aprovada: ['Aprovado, a pagar', 'red'], enviada: ['Aguardando aprovação', 'red'], devolvida: ['Devolvido', 'red'] }[c.estado] || [c.estado, ''];
+    if (c.estado === 'aprovada' && PAPEL === 'conferente') d.appendChild(btn('Marcar pago', 'primary', function (b) { confirmar(b, 'Marcar pago', function () { acao('appPagar', c.id, 'Reembolso marcado como pago.'); }); }));
+    else { var p = document.createElement('span'); p.className = 'pill ' + rotulo[1]; p.textContent = rotulo[0]; d.appendChild(p); }
+    box.appendChild(d);
+  });
+}
+async function listar(manterMsg) {
+  var box = $('lista'); if (!manterMsg) { box.textContent = 'Carregando...'; show($('acaoMsg'), false); }
   try {
-    var itens = await run('appListar', CODE), total = 0; box.innerHTML = '';
-    if (!itens.length) box.textContent = 'Nenhum comprovante nesta semana.';
-    itens.forEach(function (it) {
-      total += Number(it.valor) || 0;
-      var d = document.createElement('div'); d.className = 'item';
-      var top = document.createElement('div'); top.className = 'top';
-      var a = document.createElement('span'); a.textContent = it.estabelecimento || it.categoria;
-      var b = document.createElement('span'); b.textContent = brl(it.valor); top.appendChild(a); top.appendChild(b);
-      var m = document.createElement('div'); m.className = 'meta';
-      m.textContent = it.dataDoc.split('-').reverse().join('/') + ' · Centro ' + it.centro + ' · ' + it.categoria + (it.obs ? ' · ' + it.obs : '') + (it.alertas ? ' · ⚠ ' + it.alertas : '');
-      var ac = document.createElement('div'); ac.className = 'acts';
-      var v = document.createElement('button'); v.textContent = 'Ver foto'; v.onclick = function () { verFoto(it.id, v); }; ac.appendChild(v);
-      if (PAPEL === 'claudenir') { var x = document.createElement('button'); x.textContent = 'Excluir'; x.onclick = function () { excluir(it.id, x); }; ac.appendChild(x); }
-      d.appendChild(top); d.appendChild(m); d.appendChild(ac); box.appendChild(d);
-    });
-    $('total').textContent = brl(total);
+    var s = await run('appSemana', CODE), cx = await run('appCaixas', CODE);
+    renderEstado(s); renderLista(s.itens); renderAnteriores(cx);
   } catch (e) { box.textContent = 'Erro: ' + e.message; }
 }
+
+async function atualizarFin() {
+  if (PAPEL !== 'claudenir') return;
+  try {
+    var s = await run('appSemana', CODE);
+    FIN_OK = (s.estado === 'aberta' || s.estado === 'devolvida') && s.itens.length > 0;
+    $('finTxt').textContent = s.itens.length + (s.itens.length === 1 ? ' comprovante' : ' comprovantes') + ' nesta semana · ' + brl(s.total);
+  } catch (e) { FIN_OK = false; }
+  show($('fin'), FIN_OK && !$('novo').hidden);
+}
+$('finBtn').onclick = function () {
+  var b = this;
+  confirmar(b, 'Finalizar semana e enviar ao conferente', async function () {
+    flash($('finMsg'), 'Enviando...', 'ok');
+    try { await run('appEnviar', CODE, null); flash($('finMsg'), 'Semana finalizada e enviada ao conferente.', 'ok'); FIN_OK = false; setTimeout(function () { aba('semana'); }, 900); }
+    catch (e) { flash($('finMsg'), e.message, 'err'); }
+  });
+};
 async function verFoto(id, btn) {
   btn.disabled = true;
-  try { var d = await run('appFoto', CODE, id); if (d.indexOf('application/pdf') > 0) { var w = document.createElement('a'); w.href = d; w.target = '_blank'; w.click(); } else { $('modalImg').src = d; show($('modal'), true); } }
+  try { var d = await run('appFoto', CODE, id); if (d.indexOf('data:image') !== 0) { alert('Esta nota não tem prévia para exibir.'); } else { $('modalImg').src = d; show($('modal'), true); } }
   catch (e) { alert('Não abriu a foto: ' + e.message); }
   btn.disabled = false;
 }
@@ -357,7 +462,7 @@ $('enter').onclick = function () { var c = $('code').value.trim(); if (c) entrar
 $('code').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('enter').click(); });
 $('btnCam').onclick = function () { $('cam').click(); }; $('btnFile').onclick = function () { $('file').click(); };
 $('cam').onchange = function () { escolheu(this.files[0]); }; $('file').onchange = function () { escolheu(this.files[0]); };
-$('send').onclick = enviar; $('refresh').onclick = listar;
+$('send').onclick = enviar; $('refresh').onclick = function () { listar(); };
 $('modalClose').onclick = function () { show($('modal'), false); };
 (function () { var c = ''; try { c = localStorage.getItem('cx_code') || ''; } catch (e) {} if (c) entrar(c); else show($('login'), true); })();
 </script>
