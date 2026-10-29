@@ -352,7 +352,7 @@ function confirmar(b, txtOriginal, fn) {
 }
 async function acao(nome, arg, okMsg) {
   var a = $('acaoMsg'); flash(a, 'Enviando...', 'ok');
-  try { await run(nome, CODE, arg); flash(a, okMsg, 'ok'); await listar(true); }
+  try { var r = await run(nome, CODE, arg); flash(a, (r && r.mensagem) || okMsg, 'ok'); await listar(true); }
   catch (e) { flash(a, e.message, 'err'); }
 }
 function renderEstado(s) {
@@ -375,7 +375,7 @@ function renderEstado(s) {
       box.appendChild(obs);
       var row = document.createElement('div'); row.className = 'row';
       row.appendChild(btn('Devolver', '', function (b) { confirmar(b, 'Devolver', function () { acao('appDevolver', obs.value, 'Caixa devolvido ao Claudenir.'); }); }));
-      row.appendChild(btn('Aprovar o caixa', 'primary', function (b) { confirmar(b, 'Aprovar o caixa', function () { acao('appAprovar', null, 'Caixa aprovado.'); }); }));
+      row.appendChild(btn('Aprovar o caixa', 'primary', function (b) { confirmar(b, 'Aprovar o caixa', function () { acao('appAprovar', null, 'Caixa aprovado. Criando a tabela...'); }); }));
       box.appendChild(row);
     } else if (s.estado === 'aprovada') {
       box.appendChild(btn('Marcar reembolso como pago', 'primary', function (b) { confirmar(b, 'Marcar reembolso como pago', function () { acao('appPagar', 'atual', 'Reembolso marcado como pago.'); }); }));
